@@ -1,0 +1,3 @@
+docker login registry.gitlab.com -u gitlab+deploy-token-891255 -p jLcgobswsNb_y_NgAqHT
+docker build --pull -t registry.gitlab.com/liho00/dapp-directus:dev -f docker/Dockerfile .
+docker push registry.gitlab.com/liho00/dapp-directus:dev
