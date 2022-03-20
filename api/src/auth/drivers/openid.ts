@@ -19,6 +19,8 @@ import { Url } from '../../utils/url';
 import logger from '../../logger';
 import { getIPFromReq } from '../../utils/get-ip-from-req';
 import { getConfigFromEnv } from '../../utils/get-config-from-env';
+import emitter from '../../emitter';
+import getDatabase from '../../database';
 
 export class OpenIDAuthDriver extends LocalAuthDriver {
 	client: Promise<Client>;
@@ -168,7 +170,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			throw new InvalidCredentialsException();
 		}
 
-		await this.usersService.createOne({
+		const userPayload = {
 			provider: this.config.provider,
 			first_name: userInfo.given_name,
 			last_name: userInfo.family_name,
@@ -176,7 +178,26 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			external_identifier: identifier,
 			role: this.config.defaultRoleId,
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
-		});
+		};
+
+		// Run hook so the end user has the chance to augment the
+		// user that is about to be created
+		const updatedUserPayload = await emitter.emitFilter(
+			`auth.register`,
+			userPayload,
+			{
+				identifier,
+				provider: this.config.provider,
+				accessToken: tokenSet.access_token,
+			},
+			{
+				database: getDatabase(),
+				schema: this.schema,
+				accountability: null,
+			}
+		);
+
+		await this.usersService.createOne(updatedUserPayload);
 
 		return (await this.fetchUserId(identifier)) as string;
 	}

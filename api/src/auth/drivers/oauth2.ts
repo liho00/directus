@@ -19,6 +19,8 @@ import { Url } from '../../utils/url';
 import logger from '../../logger';
 import { getIPFromReq } from '../../utils/get-ip-from-req';
 import { getConfigFromEnv } from '../../utils/get-config-from-env';
+import emitter from '../../emitter';
+import getDatabase from '../../database';
 
 export class OAuth2AuthDriver extends LocalAuthDriver {
 	client: Client;
@@ -117,6 +119,13 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			throw handleError(e);
 		}
 
+		switch (this.config.provider) {
+			case 'twitter':
+				userInfo = userInfo.data as any;
+				userInfo['email'] = `${userInfo['username']}@domain.com`;
+				break;
+		}
+
 		const { emailKey, identifierKey, allowPublicRegistration } = this.config;
 
 		const email = userInfo[emailKey ?? 'email'] as string | null | undefined;
@@ -148,13 +157,33 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			throw new InvalidCredentialsException();
 		}
 
-		await this.usersService.createOne({
+		const userPayload = {
 			provider: this.config.provider,
 			email: email,
 			external_identifier: identifier,
 			role: this.config.defaultRoleId,
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
-		});
+		};
+
+		// Run hook so the end user has the chance to augment the
+		// user that is about to be created
+		const updatedUserPayload = await emitter.emitFilter(
+			`auth.register`,
+			userPayload,
+			{
+				identifier,
+				provider: this.config.provider,
+				accessToken: tokenSet.access_token,
+				userInfo,
+			},
+			{
+				database: getDatabase(),
+				schema: this.schema,
+				accountability: null,
+			}
+		);
+
+		await this.usersService.createOne(updatedUserPayload);
 
 		return (await this.fetchUserId(identifier)) as string;
 	}
